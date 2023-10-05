@@ -210,6 +210,7 @@ def chamfer_distance_tf_None(array1, array2):
     av_dist2 = av_dist_None(array2, array1)
     return av_dist1+av_dist2
 
+
 def distance_matrix_None(array1, array2, num_point, num_features = 3):
     """
     arguments: 
@@ -249,7 +250,7 @@ def get_reg_loss():
     return res
 
 
-def chamfer_distance_tf_None2(p, q):
+def chamfer_distance_tf_None(p, q):
     from nn_distance import tf_nndistance
     a,b,c,d = tf_nndistance.nn_distance(p,q)
     cd1 = tf.reduce_mean(a)
@@ -263,15 +264,13 @@ input_points_3d = tf.placeholder(tf.float64, shape=[BS, POINT_NUM,3])
 points_target_num = tf.placeholder(tf.int64, shape=[1,1])
 points_input_num = tf.placeholder(tf.int64, shape=[1,1])
 global_step = tf.placeholder(tf.float64, shape=[])
-size_input = tf.placeholder(tf.float64, shape=[])
-size_input3 = tf.placeholder(tf.float64, shape=[])
-size_input2 = tf.placeholder(tf.float64, shape=[])
+
 
 def smaller(p):
     p = (p - (VOX_SIZE - 1)/2.0) / ((VOX_SIZE-1)/ 2.0/bd)
     return p
     
-def biliniear_interpolation_3d(data, warp):
+def trilinear_interpolation_3d(data, warp):
     """
     Interpolate a 3D array (monochannel).
     :param data: 3D tensor.
@@ -349,8 +348,8 @@ def gridpull(input_points_3d, points_target):
     vox = get_vox(VOX_SIZE)
     points = bigger(input_points_3d, VOX_SIZE)  # (input_points_3d + 1) * (VOX_SIZE / 2)
     gtpoints = bigger(points_target, VOX_SIZE)
-    sdf, grad = biliniear_interpolation_3d(vox, points[0])
-    gtsdf, gtgrad = biliniear_interpolation_3d(vox, gtpoints[0])
+    sdf, grad = trilinear_interpolation_3d(vox, points[0])
+    gtsdf, gtgrad = trilinear_interpolation_3d(vox, gtpoints[0])
     gtsdf = gtsdf[None]
     sdf = sdf[None]
     dis = tf.exp(tf.sqrt(tf.reduce_sum((input_points_3d - points_target)**2, 2)))
@@ -476,16 +475,8 @@ with tf.Session(config=config) as sess:
                 input_points_2d_bs = noises[:, epoch * POINT_NUM : (epoch + 1) * POINT_NUM]
                 point_gt = selectgts[:, epoch * POINT_NUM : (epoch + 1) * POINT_NUM]
                 feature_bs_t = feature_bs[0,:,:].reshape(1,-1,SHAPE_NUM)
-                if True: # i < 3000:
-                    size_input_ss = np.random.rand() * 3
-                    size_input2_ss = np.random.rand() * 3
-                    size_input3_ss = np.random.rand() * 3
-                else:
-                    size_input_ss = np.random.rand() * 1
-                    size_input2_ss = np.random.rand() * 1
-                    size_input2_ss = np.random.rand() * 1
                 at = time.time()
-                _,loss_c, l2loss, voxloss, sdfloss, gradloss,  sdfs, ggp, grad_output, gtgrad_output, vv = sess.run([loss_optim,loss, l2_loss, vox_loss, sdf_loss, grad_loss, sdf, g_points, grad, gtgrad, voxs],feed_dict={size_input: size_input_ss, size_input2: size_input2_ss, size_input3: size_input3_ss, global_step: i, input_points_3d:input_points_2d_bs,points_target:point_gt,feature:feature_bs_t,points_target_num:POINT_NUM_GT_bs,points_input_num:points_input_num_bs})
+                _,loss_c, l2loss, voxloss, sdfloss, gradloss = sess.run([loss_optim,loss, l2_loss, vox_loss, sdf_loss, grad_loss],feed_dict={global_step: i, input_points_3d:input_points_2d_bs,points_target:point_gt,feature:feature_bs_t,points_target_num:POINT_NUM_GT_bs,points_input_num:points_input_num_bs})
                 train_time += time.time() - at
                 loss_i = loss_i + loss_c
                 # print(sdfs)
