@@ -46,19 +46,16 @@ parser.add_argument('--level', type=int, default=15)
 parser.add_argument('--obj_ind', type=int, default=0)
 a = parser.parse_args()
 
-
 cuda_idx = str(a.CUDA)
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"]= cuda_idx
-
 
 BS = 1
 POINT_NUM = 50000
 POINT_NUM_GT = 50000
 INPUT_DIR = a.data_dir
 INDEX = a.index
-GRID_SIZE = 1621
-VOX_SIZE =256
+VOX_SIZE =128
 SCALE = a.scale
 LR = a.lr
 BASE_LR = a.base_lr
@@ -69,14 +66,7 @@ SAMPLE_TYPE= 10 # a.sample_type
 TEST_VOX_SIZE = 256
 OUTPUT_DIR = a.out_dir
 
-listdir = os.path.join(INPUT_DIR, 'list.txt')
-with open(listdir, 'r') as f:
-    obj_names = f.readlines()
-    objn = obj_names[a.obj_ind].strip('\n')
-    objn = objn.split('.')[0]
-obj_name = os.path.join(INPUT_DIR, 'famous_noisefree', '04_pts', objn+'.xyz.npy')
-
-
+obj_name = os.path.join(INPUT_DIR, 'demo.ply')
 if obj_name[-4:] == '.xyz':
     gttxt = np.loadtxt(obj_name)
     gttxt = gttxt[:, :3]
@@ -267,58 +257,6 @@ def chamfer_distance_tf_None2(p, q):
     return cd1+cd2
 
 
-files = []
-files_path = []
-
-if(a.dataset == "shapenet"):
-    f = open('./data/shapenet_val.txt','r')
-    for index,line in enumerate(f):
-        if(line.strip().split('/')[0]==a.class_idx):
-            #print(line)
-            files.append(line.strip().split('/')[1])
-    f.close()
-
-if(a.dataset == "famous"):
-    f = open('./data/famous_testset.txt','r')
-    for index,line in enumerate(f):
-        #print(line)
-        files.append(line.strip('\n'))
-    f.close()
-    
-if(a.dataset == "ABC" or a.dataset == "other"):
-    fileAll = os.listdir(INPUT_DIR)
-    for file in fileAll:
-        if(re.findall(r'.*.npz', file, flags=0)):
-            print(file.strip().split('.')[0])
-            files.append(file.strip().split('.')[0])
-
-for file in files:
-    files_path.append(INPUT_DIR + file + '.npz')
-SHAPE_NUM = 1 # len(files_path)
-print('SHAPE_NUM:',SHAPE_NUM)
-
-pointclouds = []
-samples = []
-mm = 0
-if(TRAIN):
-    for file in files_path:
-        load_data = np.load(file)
-        gt = load_data['sample_near'][0]
-        point = np.asarray(load_data['sample_near']).reshape(-1,POINT_NUM,3)
-        sample = np.asarray(load_data['sample']).reshape(-1,POINT_NUM,3)
-        pointclouds.append(point)
-        samples.append(sample)
-    
-    pointclouds = np.asarray(pointclouds)
-    samples = np.asarray(samples)
-    print('data shape:',pointclouds.shape,samples.shape)
-else:
-    for file in files_path:
-        load_data = np.load(file)
-        points = np.asarray(load_data['sample_near']).reshape(-1, 3)
-        pointclouds.append(points[:20000])
-    pointclouds = np.asarray(pointclouds)
-
 feature = tf.placeholder(tf.float64, shape=[BS,None,SHAPE_NUM])
 points_target = tf.placeholder(tf.float64, shape=[BS,POINT_NUM,3])
 input_points_3d = tf.placeholder(tf.float64, shape=[BS, POINT_NUM,3])
@@ -332,53 +270,6 @@ size_input2 = tf.placeholder(tf.float64, shape=[])
 def smaller(p):
     p = (p - (VOX_SIZE - 1)/2.0) / ((VOX_SIZE-1)/ 2.0/bd)
     return p
-
-def biliniear_interpolation_3d2(data, warp):
-    """
-    Interpolate a 3D array (monochannel).
-    :param data: 3D tensor.
-    :param warp: a list of 3D coordinates to interpolate. 2D tensor with shape (n_points, 3).
-    """
-    # warp =  (warp + 1) * (VOX_SIZE / 2)
-    n_pts = warp.shape[0]
-    # Pad data around to avoid indexing overflow
-    # data = tf.pad(data, [[1, 1], [1, 1], [1, 1]], mode='SYMMETRIC')
-    x, y, z = warp[:, 0], warp[:, 1], warp[:, 2]
-    warp = tf.cast(warp, 'float64') #  + tf.constant([1, 1, 1], dtype='float64')
-    i000 = tf.cast(tf.floor(warp), dtype=tf.int64)
-    i100 = i000 + tf.constant([1, 0, 0], dtype=tf.int64)
-    i010 = i000 + tf.constant([0, 1, 0], dtype=tf.int64)
-    i001 = i000 + tf.constant([0, 0, 1], dtype=tf.int64)
-    i110 = i000 + tf.constant([1, 1, 0], dtype=tf.int64)
-    i101 = i000 + tf.constant([1, 0, 1], dtype=tf.int64)
-    i011 = i000 + tf.constant([0, 1, 1], dtype=tf.int64)
-    i111 = i000 + tf.constant([1, 1, 1], dtype=tf.int64)
-    c000 = tf.gather_nd(data, i000)
-    c100 = tf.gather_nd(data, i100)
-    c010 = tf.gather_nd(data, i010)
-    c001 = tf.gather_nd(data, i001)
-    c110 = tf.gather_nd(data, i110)
-    c101 = tf.gather_nd(data, i101)
-    c011 = tf.gather_nd(data, i011)
-    c111 = tf.gather_nd(data, i111)
-    x0 = tf.cast(i000[:, 0], dtype=tf.float64)
-    y0 = tf.cast(i000[:, 1], dtype=tf.float64)
-    z0 = tf.cast(i000[:, 2], dtype=tf.float64)
-    x1 = tf.cast(i111[:, 0], dtype=tf.float64)
-    y1 = tf.cast(i111[:, 1], dtype=tf.float64)
-    z1 = tf.cast(i111[:, 2], dtype=tf.float64)
-    a0 = -(-c000*x1*y1*z1+c001*x1*y1*z0+c010*x1*y0*z1-c011*x1*y0*z0) - (c100*x0*y1*z1-c101*x0*y1*z0-c110*x0*y0*z1+c111*x0*y0*z0)
-    a1 = -(c000*y1*z1-c001*y1*z0-c010*y0*z1+c011*y0*z0) - (-c100*y1*z1+c101*y1*z0+c110*y0*z1-c111*y0*z0)
-    a2 = -(c000*x1*z1-c001*x1*z0-c010*x1*z1+c011*x1*z0) - (-c100*x0*z1+c101*x0*z0+c110*x0*z1-c111*x0*z0)
-    a3 = -(c000*x1*y1-c001*x1*y1-c010*x1*y0+c011*x1*y0) - (-c100*x0*y1+c101*x0*y1+c110*x0*y0-c111*x0*y0)
-    a4 = -(-c000*z1+c001*z0+c010*z1-c011*z0 + c100*z1 - c101*z0 - c110*z1 + c111*z0)
-    a5 = -(-c000*y1+c001*y1+c010*y0-c011*y0 + c100*y1 - c101*y1 - c110*y0 + c111*y0)
-    a6 = -(-c000*x1+c001*x1+c010*x1-c011*x1 + c100*x0 - c101*x0 - c110*x0 + c111*x0)
-    a7 = -(c000-c001-c010+c011-c100+c101+c110-c111)
-
-    f = a0 + a1 * x + a2 * y + a3 * z + a4 * x * y + a5 * x * z + a6 * y * z + a7 * x * y * z
-
-    return f[:, None]
     
 def biliniear_interpolation_3d(data, warp):
     """
@@ -444,27 +335,9 @@ def biliniear_interpolation_3d(data, warp):
     grad = tf.concat([gradx, grady, gradz], 1)
 
     return f[:, None], grad
+    
 
-
-def get_grad(data, points):
-    points =  bigger(points) # (points + 1) * ((VOX_SIZE-1) / 2)
-    err = size_input # global_step # SCALE # 1.0 /(VOX_SIZE) # dis ##第一处不同
-    err2 = size_input
-    err3 = size_input
-    x_points = points + tf.concat([err * tf.ones([POINT_NUM, 1], 'float64'), tf.zeros([POINT_NUM, 2], 'float64')], 1)
-    y_points = points + tf.concat([tf.zeros([POINT_NUM, 1], 'float64'), err2 * tf.ones([POINT_NUM, 1], 'float64'), tf.zeros([POINT_NUM, 1], 'float64')], 1)
-    z_points = points + tf.concat([tf.zeros([POINT_NUM, 2], 'float64'), err3 * tf.ones([POINT_NUM, 1], 'float64')], 1)
-    x_points_dev = points + tf.concat([-err * tf.ones([POINT_NUM, 1], 'float64'), tf.zeros([POINT_NUM, 2], 'float64')], 1)
-    y_points_dev = points + tf.concat([tf.zeros([POINT_NUM, 1], 'float64'), -err2 * tf.ones([POINT_NUM, 1], 'float64'), tf.zeros([POINT_NUM, 1], 'float64')], 1)
-    z_points_dev = points + tf.concat([tf.zeros([POINT_NUM, 2], 'float64'), -err3 * tf.ones([POINT_NUM, 1], 'float64')], 1)
-    x_grad = biliniear_interpolation_3d(data, x_points) - biliniear_interpolation_3d(data, x_points_dev)
-    y_grad = biliniear_interpolation_3d(data, y_points) - biliniear_interpolation_3d(data, y_points_dev)
-    z_grad = biliniear_interpolation_3d(data, z_points) - biliniear_interpolation_3d(data, z_points_dev)
-    grad = tf.concat([x_grad, y_grad, z_grad], 1)
-    return grad
-
-
-def get_special_vox(dim):
+def get_vox(dim):
     a = sphere_init_sdf
     a = np.float64(a)
     a = tf.convert_to_tensor(a)
@@ -473,7 +346,7 @@ def get_special_vox(dim):
     
     
 def gridpull(input_points_3d, points_target):
-    vox = get_special_vox(VOX_SIZE)
+    vox = get_vox(VOX_SIZE)
     points = bigger(input_points_3d, VOX_SIZE)  # (input_points_3d + 1) * (VOX_SIZE / 2)
     gtpoints = bigger(points_target, VOX_SIZE)
     sdf, grad = biliniear_interpolation_3d(vox, points[0])
@@ -502,18 +375,6 @@ def get_lr(step):
     lr = BASE_LR * bilv
     return lr
 
-
-def get_sample_gt_pair3(gts, kdtree, batch_size, pn):
-    index = np.random.choice(gts.shape[0], POINT_NUM_GT, replace = False)
-    noise = gts[index[:POINT_NUM_GT // 2]] + np.random.uniform(-np.sqrt(3)/VOX_SIZE, np.sqrt(3)/VOX_SIZE,size=[gts.shape[0]//2, 3])
-    noise2 = gts[index[POINT_NUM_GT // 2:]] + np.random.uniform(-0.002, 0.002, size=[gts.shape[0]//2, 3])
-    noise = np.concatenate([noise, noise2], 0)
-    dist, idx = kdtree.query(noise)
-    select_gts = gts[idx]
-    noise = noise[None]
-    select_gts = select_gts[None]
-    return noise, select_gts
-    
     
 def get_sample_gt_pair(gts, kdtree, batch_size, pn, step, sample_weight):
     noise = get_sample(gts, POINT_NUM_GT, SAMPLE_TYPE, step, sample_weight)
@@ -530,6 +391,7 @@ useful_index_tf = tf.cast(tf.convert_to_tensor(useful_index), tf.int32)
 useful_index_tf_weight = tf.cast(tf.convert_to_tensor(useful_index_weight), tf.float64)
 useful_middle_grid_sdf = tf.gather_nd(voxs, useful_index_tf)
 vox_loss = tf.zeros(useful_middle_grid_sdf.shape, tf.float64)
+
 for i in range(6):
     index = useful_index.copy()
     if i < 3:
